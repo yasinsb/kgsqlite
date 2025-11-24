@@ -3,5 +3,8 @@ openai
 python-dotenv
 apsw
 sqlite-vec
+ipykernel
+ipywidgets
+scikit-learn
 
 

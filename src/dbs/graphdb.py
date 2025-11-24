@@ -6,8 +6,10 @@ import apsw
 import sqlite_vec
 import struct
 import json
+import numpy as np
 from pathlib import Path
 from typing import List, Dict, Optional, Literal, Tuple
+from sklearn.metrics.pairwise import cosine_similarity
 
 from src.lms.openai_untils import embed_text
 
@@ -15,6 +17,11 @@ from src.lms.openai_untils import embed_text
 def serialize(vector: List[float]) -> bytes:
     """Serialize a list of floats into compact bytes format."""
     return struct.pack("%sf" % len(vector), *vector)
+
+
+def deserialize(blob: bytes, dim: int = 1536) -> List[float]:
+    """Deserialize bytes back to list of floats."""
+    return list(struct.unpack("%sf" % dim, blob))
 
 
 class GraphDB:
@@ -104,7 +111,7 @@ class GraphDB:
             node_type: Filter by node type (default: 'paper')
         
         Returns:
-            List of dicts with id, name, type, distance
+            List of dicts with id, name, type, distance, similarity
         """
         cursor = self.db.cursor()
         
@@ -113,7 +120,8 @@ class GraphDB:
                 nodes.id,
                 nodes.name,
                 nodes.type,
-                distance
+                distance,
+                vec_embeddings.embedding
             FROM vec_embeddings
             JOIN nodes ON nodes.id = vec_embeddings.node_id
             WHERE embedding MATCH ?
@@ -128,10 +136,22 @@ class GraphDB:
         sql += " ORDER BY distance"
         
         results = cursor.execute(sql, params).fetchall()
-        return [
-            {'id': r[0], 'name': r[1], 'type': r[2], 'distance': r[3]}
-            for r in results
-        ]
+        
+        # Calculate cosine similarity for each result
+        query_embedding = np.array(embedding).reshape(1, -1)
+        output = []
+        for r in results:
+            result_embedding = np.array(deserialize(r[4])).reshape(1, -1)
+            similarity = cosine_similarity(query_embedding, result_embedding)[0][0]
+            output.append({
+                'id': r[0], 
+                'name': r[1], 
+                'type': r[2], 
+                'distance': r[3],
+                'similarity': float(similarity)
+            })
+        
+        return output
     
     def search_by_text(
         self, 
